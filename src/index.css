@@ -1,0 +1,57 @@
+@import 'tailwindcss';
+/* Display face: Archivo (tight, athletic grotesque). Degrades to a narrow
+   system stack offline so the app never blocks on the network. */
+@import url('https://fonts.googleapis.com/css2?family=Archivo:wght@600;800;900&display=swap');
+
+/* ──────────────────────────────────────────────────────────────────────────
+   "Garage iron" — the palette of a 6am session: ink slate, steel, and the
+   warm amber of a sodium lamp / rusted kettlebell. The numbers are the hero.
+   ────────────────────────────────────────────────────────────────────────── */
+@theme {
+  --color-ink: #0c0f14;
+  --color-steel-950: #11151d;
+  --color-steel-900: #161b25;
+  --color-steel-800: #1e2531;
+  --color-steel-700: #2b3340;
+  --color-steel-600: #3c4654;
+  --color-fog: #aeb8c6;
+  --color-chalk: #f4f6fb;
+  --color-amber: #ff8a3d;
+  --color-amber-bright: #ffae5e;
+  --color-amber-dim: #c96a28;
+
+  --font-display: 'Archivo', 'Arial Narrow', system-ui, sans-serif;
+  --font-sans: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
+}
+
+:root {
+  color-scheme: dark;
+}
+
+html,
+body,
+#root {
+  min-height: 100svh;
+  margin: 0;
+}
+
+body {
+  background: var(--color-ink);
+  color: var(--color-chalk);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Tabular figures everywhere a weight/rep is shown — digits must not jiggle. */
+.nums {
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.01em;
+}
+
+/* Respect reduced-motion for the few transitions we use. */
+@media (prefers-reduced-motion: reduce) {
+  * {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}

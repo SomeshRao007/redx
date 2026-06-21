@@ -1,0 +1,113 @@
+import {
+  createContext,
+  useContext,
+  useEffect,
+  useMemo,
+  useState,
+  type ReactNode,
+} from 'react'
+
+export type User = {
+  id: string
+  name: string
+  email: string
+  picture?: string
+}
+
+type AuthState = {
+  user: User | null
+  token: string | null
+  loading: boolean
+  signIn: () => void
+  signOut: () => void
+}
+
+const AuthContext = createContext<AuthState | null>(null)
+const TOKEN_KEY = 'wa_token'
+const STUB = import.meta.env.VITE_AUTH_STUB === '1'
+
+/** Decode a JWT payload (no verification — client display only; the Worker verifies). */
+function userFromToken(token: string): User | null {
+  const part = token.split('.')[1]
+  if (!part) return null
+  const json = JSON.parse(
+    atob(part.replace(/-/g, '+').replace(/_/g, '/')),
+  ) as Record<string, unknown>
+  if (typeof json.sub !== 'string') return null
+  // expiry guard — treat an expired token as signed-out
+  if (typeof json.exp === 'number' && json.exp * 1000 < Date.now()) return null
+  return {
+    id: json.sub,
+    name: (json.name as string) ?? (json.email as string) ?? 'Athlete',
+    email: (json.email as string) ?? '',
+    picture: json.picture as string | undefined,
+  }
+}
+
+export function AuthProvider({ children }: { children: ReactNode }) {
+  const [token, setToken] = useState<string | null>(null)
+  const [user, setUser] = useState<User | null>(null)
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    // OAuth redirect lands as ?token=...; capture then clean the URL.
+    const url = new URL(window.location.href)
+    const fromUrl = url.searchParams.get('token')
+    if (fromUrl) {
+      localStorage.setItem(TOKEN_KEY, fromUrl)
+      url.searchParams.delete('token')
+      window.history.replaceState({}, '', url.pathname + url.search)
+    }
+    const stored = localStorage.getItem(TOKEN_KEY)
+    if (stored) {
+      const u = userFromToken(stored)
+      if (u) {
+        setToken(stored)
+        setUser(u)
+      } else {
+        localStorage.removeItem(TOKEN_KEY)
+      }
+    }
+    setLoading(false)
+  }, [])
+
+  const value = useMemo<AuthState>(
+    () => ({
+      user,
+      token,
+      loading,
+      signIn: () => {
+        if (STUB) {
+          // local-dev identity so the whole app loop is testable without Google.
+          const stub = btoa(
+            JSON.stringify({
+              sub: 'stub-user',
+              name: 'Local Dev',
+              email: 'dev@local',
+            }),
+          )
+          const fake = `stub.${stub}.stub`
+          localStorage.setItem(TOKEN_KEY, fake)
+          setToken(fake)
+          setUser(userFromToken(fake))
+          return
+        }
+        window.location.href = '/auth/google/login'
+      },
+      signOut: () => {
+        localStorage.removeItem(TOKEN_KEY)
+        setToken(null)
+        setUser(null)
+      },
+    }),
+    [user, token, loading],
+  )
+
+  return <AuthContext value={value}>{children}</AuthContext>
+}
+
+export function useAuth(): AuthState {
+  const ctx = useContext(AuthContext)
+  if (!ctx) throw new Error('useAuth must be used within AuthProvider')
+  return ctx
+}
