@@ -7,6 +7,7 @@
     "dev": "vite",
     "seed": "tsx scripts/seed-catalog.ts",
     "smoke": "tsx scripts/schema-smoke.ts",
+    "test": "tsx scripts/sync-test.ts",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
     "preview": "vite preview"

@@ -4,4 +4,13 @@ pages_build_output_dir = "dist"
 
 # Secrets (set via `wrangler pages secret put` or the dashboard; never commit):
 #   GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, JWT_SECRET
+#   AUTH_STUB=1 (local dev only — enables /auth/dev-login). Never set in prod.
 # For local dev put them in .dev.vars (gitignored).
+
+# User data store (M2 sync). database_id is filled in on deploy
+# (`wrangler d1 create workout-db`); local dev uses an on-disk SQLite under .wrangler.
+[[d1_databases]]
+binding = "DB"
+database_name = "workout-db"
+database_id = "local-placeholder-set-on-deploy"
+migrations_dir = "migrations"

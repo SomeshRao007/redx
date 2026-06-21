@@ -1,8 +1,14 @@
 import { NavLink, Outlet } from 'react-router-dom'
 import { useEffect } from 'react'
 import { seedCatalog } from '../db/database'
+import { exportData } from '../db/actions'
+import { startSync, stopSync } from '../db/sync'
 import { useAuth } from '../auth/AuthContext'
 import { useUnit, setUnit } from '../lib/units'
+
+// Sync only runs against a real backend: prod, or `VITE_SYNC=1` under wrangler. Plain
+// `npm run dev` has no Pages Functions, so it stays off.
+const SYNC_ON = import.meta.env.PROD || import.meta.env.VITE_SYNC === '1'
 
 const NAV = [
   { to: '/app/today', label: 'Today', icon: TodayIcon },
@@ -11,12 +17,20 @@ const NAV = [
 ]
 
 export function AppShell() {
-  const { user, signOut } = useAuth()
+  const { user, token, signOut } = useAuth()
   const unit = useUnit()
 
   useEffect(() => {
     seedCatalog()
   }, [])
+
+  useEffect(() => {
+    if (!token || !SYNC_ON) return
+    startSync(token)
+    return () => {
+      void stopSync()
+    }
+  }, [token])
 
   return (
     <div className="mx-auto flex min-h-svh max-w-lg flex-col bg-ink">
@@ -49,6 +63,17 @@ export function AppShell() {
             </button>
           ))}
         </div>
+
+        <button
+          type="button"
+          onClick={() => exportData()}
+          aria-label="Export data"
+          className="grid size-9 place-items-center rounded-lg text-fog transition-colors hover:bg-steel-800 hover:text-chalk focus-visible:outline-2 focus-visible:outline-amber"
+        >
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3" />
+          </svg>
+        </button>
 
         <button
           type="button"

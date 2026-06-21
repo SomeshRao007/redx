@@ -3,3 +3,6 @@
 GOOGLE_CLIENT_ID=your-client-id.apps.googleusercontent.com
 GOOGLE_CLIENT_SECRET=your-client-secret
 JWT_SECRET=generate-a-long-random-string
+# Local dev only — enables /auth/dev-login (real JWT for the stub user) so sync works
+# without Google. NEVER set this in production.
+AUTH_STUB=1

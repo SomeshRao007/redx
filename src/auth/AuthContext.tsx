@@ -78,7 +78,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       loading,
       signIn: () => {
         if (STUB) {
-          // local-dev identity so the whole app loop is testable without Google.
+          // Built (PROD, incl. `wrangler pages dev`): get a REAL JWT from the dev-only
+          // function so sync uses the same verified path as production.
+          if (import.meta.env.PROD) {
+            window.location.href = '/auth/dev-login'
+            return
+          }
+          // Plain `npm run dev`: no backend → fabricate a client-only identity (sync off).
           const stub = btoa(
             JSON.stringify({
               sub: 'stub-user',

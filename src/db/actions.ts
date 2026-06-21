@@ -82,3 +82,25 @@ export async function deleteSet(id: string): Promise<void> {
   const doc = await db.setlogs.findOne(id).exec()
   if (doc) await doc.patch({ deletedAt: now(), updatedAt: now() })
 }
+
+/** Download this user's data as JSON (Part G backup; complements server sync). */
+export async function exportData(): Promise<void> {
+  const db = await getDb()
+  const [sessions, setlogs] = await Promise.all([
+    db.sessions.find().exec(),
+    db.setlogs.find().exec(),
+  ])
+  const payload = {
+    exportedAt: now(),
+    sessions: sessions.map((d) => d.toJSON()),
+    setlogs: setlogs.map((d) => d.toJSON()),
+  }
+  const url = URL.createObjectURL(
+    new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' }),
+  )
+  const a = document.createElement('a')
+  a.href = url
+  a.download = `rackd-export-${today()}.json`
+  a.click()
+  URL.revokeObjectURL(url)
+}

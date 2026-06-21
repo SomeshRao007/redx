@@ -41,13 +41,16 @@ async function create(): Promise<WorkoutDatabase> {
   return db
 }
 
-/** Seed the catalog once. Idempotent: skips if already loaded at the current version. */
+// Bump together with the catalog JSON filename to push a new catalog to clients.
+const CATALOG_VERSION = 1
+
+/** Seed/refresh the catalog. Idempotent: re-seeds only when the version changed. */
 export async function seedCatalog(): Promise<void> {
+  if (localStorage.getItem('wa_catalog_v') === String(CATALOG_VERSION)) return
   const db = await getDb()
-  const count = await db.exercises.count().exec()
-  if (count > 0) return
   const res = await fetch('/catalog/exercises.v1.json')
   if (!res.ok) return
   const exercises = await res.json()
-  await db.exercises.bulkInsert(exercises)
+  await db.exercises.bulkUpsert(exercises) // upsert → re-seed is idempotent
+  localStorage.setItem('wa_catalog_v', String(CATALOG_VERSION))
 }
