@@ -14,8 +14,12 @@ const BASE = 'http://localhost:8788'
 // Shipping sync.ts uses relative URLs (correct in a browser). Node's fetch rejects them,
 // so resolve relative paths against BASE here — mirrors how the browser resolves them.
 const realFetch = globalThis.fetch
-globalThis.fetch = ((input: string | URL | Request, init?: RequestInit) =>
-  realFetch(typeof input === 'string' && input.startsWith('/') ? BASE + input : input, init)) as typeof fetch
+let offline = false // simulate a dropped network for /sync calls (D3 outbox test)
+globalThis.fetch = ((input: string | URL | Request, init?: RequestInit) => {
+  const url = typeof input === 'string' && input.startsWith('/') ? BASE + input : input
+  if (offline && String(url).includes('/sync/push')) return Promise.reject(new Error('offline'))
+  return realFetch(url, init)
+}) as typeof fetch
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
 const withTimeout = <T>(p: Promise<T>, ms: number, label: string) =>
@@ -83,9 +87,30 @@ async function main() {
   assert.equal(pulled!.weightKg, 42.5, 'weight survived the round-trip')
   assert.equal(pulled!.userId, 'stub-user', 'server stamped userId from the JWT, not the client')
 
+  // D3: offline write must not be lost — it flushes when the network returns.
+  const id2 = `test-${crypto.randomUUID()}`
+  const ts2 = new Date().toISOString()
+  offline = true
+  await a.setlogs.insert({
+    id: id2, userId: 'stub-user', sessionId: 'sess-test', exerciseId: 'ex-test',
+    exerciseName: 'Offline Lift', weightKg: 99, reps: 3, order: 1,
+    createdAt: ts2, updatedAt: ts2, deletedAt: null,
+  })
+  repA.reSync()
+  await sleep(2500)
+  const onServerWhileOffline = await fetch(`${BASE}/sync/pull/setlogs`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+    body: JSON.stringify({ checkpoint: null, limit: 500 }),
+  }).then((r) => r.json()).then((j: { documents: { id: string }[] }) => j.documents.some((d) => d.id === id2))
+  assert.equal(onServerWhileOffline, false, 'offline write is held locally, not on the server yet')
+
+  offline = false // network returns → outbox flushes
+  repA.reSync()
+  await withTimeout(pollServerHas(id2, token), 16000, 'reconnect flush')
+
   await Promise.all([repA.cancel(), repB.cancel()])
   await Promise.all([a.close(), b.close()])
-  console.log('m2-replication-test: round-trip OK — A→D1→B, userId from JWT')
+  console.log('m2-replication-test: round-trip OK — A→D1→B, userId from JWT, offline write flushed on reconnect')
 }
 
 main().then(() => process.exit(0)).catch((e) => { console.error(e); process.exit(1) })
