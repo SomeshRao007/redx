@@ -20,6 +20,9 @@ type AuthState = {
   loading: boolean
   signIn: () => void
   signOut: () => void
+  // Email/password. Resolve to null on success, or a user-facing error message.
+  register: (email: string, password: string) => Promise<string | null>
+  loginWithPassword: (email: string, password: string) => Promise<string | null>
 }
 
 const AuthContext = createContext<AuthState | null>(null)
@@ -71,11 +74,30 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setLoading(false)
   }, [])
 
-  const value = useMemo<AuthState>(
-    () => ({
+  const value = useMemo<AuthState>(() => {
+    // POST credentials → on success store the minted JWT (same path as the ?token= redirect).
+    const authPost = async (path: string, email: string, password: string) => {
+      const res = await fetch(path, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, password }),
+      })
+      const data = (await res.json().catch(() => ({}))) as { token?: string; error?: string }
+      if (!res.ok || !data.token) return data.error ?? 'Something went wrong. Please try again.'
+      const u = userFromToken(data.token)
+      if (!u) return 'Something went wrong. Please try again.'
+      localStorage.setItem(TOKEN_KEY, data.token)
+      setToken(data.token)
+      setUser(u)
+      return null
+    }
+
+    return {
       user,
       token,
       loading,
+      register: (email, password) => authPost('/auth/register', email, password),
+      loginWithPassword: (email, password) => authPost('/auth/login', email, password),
       signIn: () => {
         if (STUB) {
           // Built (PROD, incl. `wrangler pages dev`): get a REAL JWT from the dev-only
@@ -105,9 +127,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setToken(null)
         setUser(null)
       },
-    }),
-    [user, token, loading],
-  )
+    }
+  }, [user, token, loading])
 
   return <AuthContext value={value}>{children}</AuthContext>
 }

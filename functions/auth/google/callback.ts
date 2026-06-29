@@ -1,4 +1,5 @@
-import { SignJWT, decodeJwt } from 'jose'
+import { decodeJwt } from 'jose'
+import { mintAppJwt } from '../../lib/jwt'
 
 type Env = {
   GOOGLE_CLIENT_ID: string
@@ -54,16 +55,15 @@ export const onRequestGet: PagesFunction<Env> = async ({ request, env }) => {
   const claims = decodeJwt(id_token)
   if (typeof claims.sub !== 'string') return fail()
 
-  const appJwt = await new SignJWT({
-    sub: claims.sub,
-    name: claims.name,
-    email: claims.email,
-    picture: claims.picture,
-  })
-    .setProtectedHeader({ alg: 'HS256' })
-    .setIssuedAt()
-    .setExpirationTime('30d')
-    .sign(new TextEncoder().encode(env.JWT_SECRET))
+  const appJwt = await mintAppJwt(
+    {
+      sub: claims.sub,
+      name: claims.name as string | undefined,
+      email: claims.email as string | undefined,
+      picture: claims.picture as string | undefined,
+    },
+    env.JWT_SECRET,
+  )
 
   const headers = new Headers({ Location: `${origin}/?token=${appJwt}` })
   headers.append('Set-Cookie', clear)

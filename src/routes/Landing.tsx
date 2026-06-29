@@ -1,9 +1,27 @@
 import { Navigate } from 'react-router-dom'
+import { useState, type FormEvent } from 'react'
 import { useAuth } from '../auth/AuthContext'
 
 export function Landing() {
-  const { user, signIn } = useAuth()
+  const { user, signIn, register, loginWithPassword } = useAuth()
+  const [mode, setMode] = useState<'login' | 'register'>('login')
+  const [email, setEmail] = useState('')
+  const [password, setPassword] = useState('')
+  const [error, setError] = useState<string | null>(null)
+  const [busy, setBusy] = useState(false)
   if (user) return <Navigate to="/app" replace />
+
+  async function onSubmit(e: FormEvent) {
+    e.preventDefault()
+    setBusy(true)
+    setError(null)
+    const err = await (mode === 'register' ? register : loginWithPassword)(email, password)
+    // On success `user` is set → the <Navigate> above redirects on the next render.
+    if (err) {
+      setError(err)
+      setBusy(false)
+    }
+  }
 
   return (
     <main className="relative mx-auto flex min-h-svh max-w-lg flex-col overflow-hidden px-6">
@@ -53,6 +71,63 @@ export function Landing() {
       </div>
 
       <div className="pb-10">
+        <form onSubmit={onSubmit} className="flex flex-col gap-3">
+          <input
+            type="email"
+            required
+            autoComplete="email"
+            placeholder="you@email.com"
+            aria-label="Email"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            className="w-full rounded-xl border border-steel-700 bg-steel-900 px-4 py-3.5 text-chalk placeholder:text-fog focus-visible:outline-2 focus-visible:outline-amber"
+          />
+          <input
+            type="password"
+            required
+            minLength={8}
+            autoComplete={mode === 'register' ? 'new-password' : 'current-password'}
+            placeholder={mode === 'register' ? 'Password (min 8 characters)' : 'Password'}
+            aria-label="Password"
+            aria-invalid={error ? true : undefined}
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            className="w-full rounded-xl border border-steel-700 bg-steel-900 px-4 py-3.5 text-chalk placeholder:text-fog focus-visible:outline-2 focus-visible:outline-amber"
+          />
+          {error && (
+            <p role="alert" className="text-sm font-medium text-red-400">
+              {error}
+            </p>
+          )}
+          <button
+            type="submit"
+            disabled={busy}
+            className="w-full rounded-xl bg-amber py-4 font-display text-base font-black uppercase tracking-wide text-ink transition-colors hover:bg-amber/90 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-amber disabled:opacity-60"
+          >
+            {busy ? 'One sec…' : mode === 'register' ? 'Create account' : 'Sign in'}
+          </button>
+        </form>
+
+        <p className="mt-3 text-center text-sm text-fog">
+          {mode === 'register' ? 'Already have an account?' : 'New here?'}{' '}
+          <button
+            type="button"
+            onClick={() => {
+              setMode(mode === 'register' ? 'login' : 'register')
+              setError(null)
+            }}
+            className="font-bold text-amber hover:underline"
+          >
+            {mode === 'register' ? 'Sign in' : 'Create account'}
+          </button>
+        </p>
+
+        <div className="my-5 flex items-center gap-3 text-xs font-semibold uppercase tracking-wide text-steel-600">
+          <span className="h-px flex-1 bg-steel-800" />
+          or
+          <span className="h-px flex-1 bg-steel-800" />
+        </div>
+
         <button
           type="button"
           onClick={signIn}
