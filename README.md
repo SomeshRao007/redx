@@ -1,73 +1,112 @@
-# React + TypeScript + Vite
+# Rackd
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+A workout tracker that's fast enough to use mid-set, offline-first, and shared with family.
+Pick a lift, log weight + reps, the app auto-fills your last numbers so logging takes one tap.
+No signal in the gym is fine — it syncs when you're back online.
 
-Currently, two official plugins are available:
+The bigger goal: most trackers stop at logging. Rackd is being built to also tell you
+**what to train next**, based on your recovery and what you've eaten — not just your last
+session. That part isn't built yet (see [Roadmap](#roadmap)).
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+## Status
 
-## React Compiler
+**Working today:**
+- Email/password and Google sign-in
+- Offline-first logging (RxDB + IndexedDB) — works with no connection
+- Sync across devices via Cloudflare D1 (last-write-wins)
+- Today / Log / History views, kg↔lb toggle, JSON data export
+- Installable PWA
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+**Not built yet:** plans/templates, auto-generated sessions, progression, goals, recovery
+tracking, recommendations. See [Roadmap](#roadmap).
 
-## Expanding the ESLint configuration
+Not deployed anywhere yet — runs locally for now.
 
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
+## Tech stack
 
-```js
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
+| | |
+|---|---|
+| Frontend | React 19 + TypeScript, Vite, Tailwind CSS, React Router |
+| Local data | RxDB on Dexie (IndexedDB) — local-first, offline by default |
+| Backend | Cloudflare Pages Functions (Workers) |
+| Database | Cloudflare D1 (SQLite) |
+| Auth | Google OAuth + email/password, stateless JWT |
+| PWA | vite-plugin-pwa |
+| Exercise catalog | seeded from [free-exercise-db](https://github.com/yuhonas/free-exercise-db), versioned static JSON |
 
-      // Remove tseslint.configs.recommended and replace with this
-      tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      tseslint.configs.stylisticTypeChecked,
+## Architecture
 
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+```
+Browser (PWA, React + Vite)
+  ├─ RxDB + Dexie (IndexedDB)   — local-first store, works offline
+  ├─ static exercise catalog   — seeded once, versioned JSON
+  └─ JWT held client-side
+        │  (online only)
+        ▼
+Cloudflare Pages Functions
+  ├─ /auth/*  — Google OAuth + email/password → mint JWT
+  └─ /sync    — push/pull, upsert + tombstone into D1, last-write-wins
+        ▼
+D1 (SQLite) — per-user rows: sessions, sets   ↕ pull restores the same data on a new device
 ```
 
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
+Sync model: client-generated UUID `id`, `createdAt`/`updatedAt`, `deletedAt` tombstone,
+last-write-wins by `updatedAt`. No CRDTs.
 
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
+## Run it locally
 
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+**Logging only, no sync, no auth:**
+
+```bash
+npm install
+npm run seed     # pulls the exercise catalog into public/catalog/
+npm run dev      # → http://localhost:5173
 ```
+
+**Full stack (auth + sync against local D1):**
+
+```bash
+cp .dev.vars.example .dev.vars        # set JWT_SECRET; Google keys optional, see below
+npx wrangler d1 migrations apply workout-db --local   # creates local D1 tables
+npx wrangler pages dev -- npm run dev   # → http://localhost:8788
+```
+
+Set `AUTH_STUB=1` in `.dev.vars` to sign in without a real Google OAuth client — it adds
+`/auth/dev-login`, which mints a real JWT for a fake identity. Email/password sign-in always
+works against local D1 and doesn't need this flag; it only matters for the Google button.
+Never set it in production.
+
+**Tests:**
+```bash
+npm run smoke   # RxDB schema sanity check
+npm run test    # sync replication test
+```
+
+## Using the app
+
+1. Sign in (email/password or Google).
+2. **Log** — search the exercise catalog, pick a lift, enter weight + reps per set.
+   Last session's numbers for that exercise are pre-filled.
+3. **Today** — today's sets, grouped by exercise, with set count / lift count / total volume.
+4. **History** — past sessions.
+5. Toggle kg/lb anytime from the header. Export all your data as JSON from the same header.
+
+Data lives on your device first. If you're signed in and online, it syncs to your other
+devices automatically.
+
+## Roadmap
+
+In rough order, each one shippable on its own:
+
+| | |
+|---|---|
+| Plans & templates | Build a workout plan once, reuse it. Exercises rotate automatically within a muscle group. |
+| Auto-generated sessions | Given your time and available equipment, the app builds today's session for you. |
+| Progression | Weights increase week over week automatically, with manual override. |
+| Goals & body tracking | Track weight, measurements, progress photos. See training volume per muscle group over time. |
+| Recovery & consistency | Recovery-readiness score, streaks, nudges when you're falling off pace. |
+| Exercise intelligence | Visual muscle map per exercise; smart classification for custom exercises you add. |
+| Optional AI layer | Bring your own AI key to improve plans/recommendations. Never required — the app works fully without it. |
+
+Nutrition tracking, wearable integrations, and AI form-checking are under consideration but
+not scheduled.
