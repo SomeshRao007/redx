@@ -119,6 +119,31 @@ const planTyped = toTypedRxJsonSchema(planSchemaLiteral)
 export type Plan = ExtractDocumentTypeFromTypedRxJsonSchema<typeof planTyped>
 export const planSchema: RxJsonSchema<Plan> = planSchemaLiteral
 
+// ── Exclusion (per-user, synced; a temporary/permanent "avoid this" for injury/recovery, M4) ──
+// kind 'muscle' → value is a primaryMuscles tag; kind 'exercise' → value is an exerciseId.
+// until = 'YYYY-MM-DD' or null (forever); active while until == null || until >= today.
+const exclusionSchemaLiteral = {
+  title: 'exclusion',
+  version: 0,
+  primaryKey: 'id',
+  type: 'object',
+  properties: {
+    id: { type: 'string', maxLength: 100 },
+    userId: { type: 'string', maxLength: 100 },
+    kind: { type: 'string' },
+    value: { type: 'string' },
+    label: { type: 'string' },
+    until: { type: ['string', 'null'] },
+    createdAt: { type: 'string' },
+    updatedAt: { type: 'string' },
+    deletedAt: { type: ['string', 'null'] },
+  },
+  required: ['id', 'userId', 'kind', 'value', 'createdAt', 'updatedAt'],
+} as const
+const exclusionTyped = toTypedRxJsonSchema(exclusionSchemaLiteral)
+export type Exclusion = ExtractDocumentTypeFromTypedRxJsonSchema<typeof exclusionTyped>
+export const exclusionSchema: RxJsonSchema<Exclusion> = exclusionSchemaLiteral
+
 // Parsed `days` shapes — the in-memory contract for the builder + rotation.
 export type PlanSlot = { id: string; label: string; exercisePool: string[] }
 export type PlanDay = { id: string; label: string; slots: PlanSlot[] }
@@ -128,8 +153,22 @@ export type PlannedPick = {
   exerciseId: string
   exerciseName: string
   minSets?: number // per-session set target; row turns green once this many sets are logged
+  targetReps?: number // M4 time-budget rep target; load stays user-entered (auto-filled)
+  pool?: string[] // slot's exercise pool snapshotted at lock time → mid-session swap (M4)
+  unavailable?: boolean // equipment/exclusion filter collapsed the pool → fell back unfiltered (M4)
+  added?: boolean // ad-hoc exercise added mid-session (not from the plan) — can be saved to the plan
+  savedToPlan?: boolean // an added pick that's now persisted into the plan day (recurs next time)
 }
-export type PlannedDay = { planId: string; dayId: string; label: string; picks: PlannedPick[] }
+// warmup/cooldown: derived mobility stretches (exerciseId + hold seconds), M4 R8.
+export type MobilityStep = { exerciseId: string; sec: number }
+export type PlannedDay = {
+  planId: string
+  dayId: string
+  label: string
+  picks: PlannedPick[]
+  warmup?: MobilityStep[]
+  cooldown?: MobilityStep[]
+}
 
 // ── Collection + database types (the contract subagents import) ──────────────
 export type WorkoutCollections = {
@@ -137,5 +176,6 @@ export type WorkoutCollections = {
   sessions: RxCollection<Session>
   setlogs: RxCollection<SetLog>
   plans: RxCollection<Plan>
+  exclusions: RxCollection<Exclusion>
 }
 export type WorkoutDatabase = RxDatabase<WorkoutCollections>

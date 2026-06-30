@@ -9,6 +9,7 @@ import { History } from './routes/History'
 import { Plans } from './routes/Plans'
 import { PlanBuilder } from './routes/PlanBuilder'
 import { StartDay } from './routes/StartDay'
+import { Settings } from './routes/Settings'
 
 export default function App() {
   return (
@@ -25,6 +26,7 @@ export default function App() {
               <Route path="plans/:id" element={<PlanBuilder />} />
               <Route path="plans/:id/start/:dayId" element={<StartDay />} />
               <Route path="history" element={<History />} />
+              <Route path="settings" element={<Settings />} />
             </Route>
           </Route>
           <Route path="*" element={<Navigate to="/" replace />} />

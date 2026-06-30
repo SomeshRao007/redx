@@ -2,7 +2,10 @@ import { useEffect, useRef, useState } from 'react'
 import { useRxData } from '../db/useRxData'
 import type { SetLog, PlannedPick } from '../db/schema'
 import { logSet, lastSetFor, deleteSet } from '../db/actions'
-import { setPickMinSets } from '../db/plans'
+import { setPickMinSets, setPickExercise, saveAddedPickToPlan } from '../db/plans'
+import { addExclusion } from '../db/exclusions'
+import { warmupSets, platesFor } from '../lib/lifting'
+import { usePrefs, setBarKg } from '../lib/prefs'
 import { type Unit, useUnit, unitToKg, kgToUnit, formatWeight } from '../lib/units'
 import { SetRow } from './SetRow'
 
@@ -11,10 +14,14 @@ export function PlannedExerciseRow({
   pick,
   sessionId,
   userId,
+  nameOf,
+  muscleOf,
 }: {
   pick: PlannedPick
   sessionId: string
   userId: string
+  nameOf: Map<string, string>
+  muscleOf: Map<string, string>
 }) {
   const unit = useUnit()
   const [open, setOpen] = useState(false)
@@ -56,6 +63,7 @@ export function PlannedExerciseRow({
           <span className="text-xs uppercase tracking-wide text-fog">
             {pick.slotLabel}
             {min > 0 && ` · ${sets.length}/${min} sets`}
+            {pick.targetReps ? ` · ${pick.targetReps} reps` : ''}
           </span>
         </span>
         {latest && (
@@ -79,11 +87,15 @@ export function PlannedExerciseRow({
           unit={unit}
           sets={sets}
           initialMin={min}
+          nameOf={nameOf}
+          muscleOf={muscleOf}
         />
       )}
     </li>
   )
 }
+
+type Panel = 'none' | 'swap' | 'plates' | 'rest'
 
 function InlineLogger({
   pick,
@@ -92,6 +104,8 @@ function InlineLogger({
   unit,
   sets,
   initialMin,
+  nameOf,
+  muscleOf,
 }: {
   pick: PlannedPick
   sessionId: string
@@ -99,10 +113,14 @@ function InlineLogger({
   unit: Unit
   sets: SetLog[]
   initialMin: number
+  nameOf: Map<string, string>
+  muscleOf: Map<string, string>
 }) {
   const [minSets, setMinSets] = useState(initialMin ? String(initialMin) : '')
   const [weight, setWeight] = useState('')
-  const [reps, setReps] = useState('')
+  const [reps, setReps] = useState(pick.targetReps ? String(pick.targetReps) : '')
+  const [panel, setPanel] = useState<Panel>('none')
+  const { barKg } = usePrefs()
   const repsRef = useRef<HTMLInputElement>(null)
 
   // Autofill from the last logged set (async .then → not a sync setState-in-effect).
@@ -128,6 +146,10 @@ function InlineLogger({
   const w = Number(weight)
   const r = Number(reps)
   const canLog = w > 0 && Number.isInteger(r) && r > 0
+  const wKg = w > 0 ? unitToKg(w, unit) : 0
+  const warmups = warmupSets(wKg)
+  const plates = platesFor(wKg, barKg)
+  const muscle = muscleOf.get(pick.exerciseId)
 
   async function onLog() {
     if (!canLog) return
@@ -136,14 +158,99 @@ function InlineLogger({
       sessionId,
       exerciseId: pick.exerciseId,
       exerciseName: pick.exerciseName,
-      weightKg: unitToKg(w, unit),
+      weightKg: wKg,
       reps: r,
     })
     repsRef.current?.focus()
   }
 
+  const toggle = (p: Panel) => setPanel((cur) => (cur === p ? 'none' : p))
+
   return (
     <div className="border-t border-steel-800 px-4 pb-4 pt-3">
+      {/* Toolbar: swap exercise / plate math / rest this / save-to-plan (M4) */}
+      <div className="mb-3 flex gap-2 text-xs font-bold uppercase tracking-wide">
+        {pick.pool && pick.pool.length > 1 && <Tool active={panel === 'swap'} onClick={() => toggle('swap')}>Swap</Tool>}
+        <Tool active={panel === 'plates'} onClick={() => toggle('plates')}>Plates</Tool>
+        <Tool active={panel === 'rest'} onClick={() => toggle('rest')}>Rest</Tool>
+        {pick.added && (
+          pick.savedToPlan ? (
+            <span className="rounded-lg px-3 py-1.5 text-green-400">✓ In plan</span>
+          ) : (
+            <button
+              type="button"
+              onClick={() => void saveAddedPickToPlan(sessionId, pick.slotId)}
+              className="rounded-lg bg-steel-800 px-3 py-1.5 text-fog transition-colors hover:bg-amber hover:text-ink"
+            >
+              Save to plan
+            </button>
+          )
+        )}
+      </div>
+
+      {panel === 'swap' && pick.pool && (
+        <div className="mb-3 flex flex-wrap gap-2">
+          {pick.pool.map((exId) => {
+            const active = exId === pick.exerciseId
+            return (
+              <button
+                key={exId}
+                type="button"
+                onClick={() => void setPickExercise(sessionId, pick.slotId, exId)}
+                aria-pressed={active}
+                className={`rounded-lg px-3 py-2 text-sm font-semibold transition-colors ${active ? 'bg-amber text-ink' : 'bg-steel-800 text-fog hover:text-chalk'}`}
+              >
+                {nameOf.get(exId) ?? exId}
+              </button>
+            )
+          })}
+        </div>
+      )}
+
+      {panel === 'rest' && (
+        <div className="mb-3 flex flex-wrap gap-2">
+          <RestButton onClick={() => { void addExclusion(userId, 'exercise', pick.exerciseId, pick.exerciseName, 7); setPanel('none') }}>
+            Rest this lift · 1 week
+          </RestButton>
+          {muscle && (
+            <RestButton onClick={() => { void addExclusion(userId, 'muscle', muscle, muscle, 7); setPanel('none') }}>
+              Rest {muscle} · 1 week
+            </RestButton>
+          )}
+        </div>
+      )}
+
+      {panel === 'plates' && (
+        <div className="mb-3 rounded-lg bg-steel-800 px-3 py-2 text-sm">
+          <label className="flex items-center justify-between gap-3">
+            <span className="text-xs font-semibold uppercase tracking-wide text-fog">Bar weight</span>
+            <span className="flex items-baseline gap-1">
+              <input
+                type="number"
+                inputMode="decimal"
+                step="2.5"
+                min="0"
+                value={barKg}
+                onChange={(e) => setBarKg(Number(e.target.value) || 0)}
+                aria-label="Bar weight in kg"
+                className="nums w-14 bg-transparent text-right text-base font-black text-chalk outline-none"
+              />
+              <span className="text-fog">kg</span>
+            </span>
+          </label>
+          <p className="mt-1.5">
+            {plates.length > 0 ? (
+              <>
+                <span className="font-semibold text-fog">Per side: </span>
+                <span className="nums font-bold text-chalk">{plates.join(' + ')} kg</span>
+              </>
+            ) : (
+              <span className="text-fog">Enter a weight above the {barKg}kg bar to see the plate stack.</span>
+            )}
+          </p>
+        </div>
+      )}
+
       <label className="flex items-center justify-between gap-3 rounded-lg bg-steel-800 px-3 py-2">
         <span className="text-xs font-semibold uppercase tracking-wide text-fog">Minimum sets</span>
         <input
@@ -158,6 +265,17 @@ function InlineLogger({
           className="nums w-16 bg-transparent text-right text-lg font-black text-chalk outline-none placeholder:text-steel-600"
         />
       </label>
+
+      {warmups.length > 0 && (
+        <div className="mt-2 flex items-center gap-2 text-xs">
+          <span className="font-semibold uppercase tracking-wide text-fog">Warm-up</span>
+          {warmups.map((wu) => (
+            <span key={wu.kg} className="nums rounded bg-steel-800 px-2 py-1 font-bold text-chalk">
+              {formatWeight(wu.kg, unit)}
+            </span>
+          ))}
+        </div>
+      )}
 
       <form
         onSubmit={(e) => {
@@ -198,6 +316,31 @@ function InlineLogger({
         </ul>
       )}
     </div>
+  )
+}
+
+function Tool({ active, onClick, children }: { active: boolean; onClick: () => void; children: React.ReactNode }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-pressed={active}
+      className={`rounded-lg px-3 py-1.5 transition-colors ${active ? 'bg-amber text-ink' : 'bg-steel-800 text-fog hover:text-chalk'}`}
+    >
+      {children}
+    </button>
+  )
+}
+
+function RestButton({ onClick, children }: { onClick: () => void; children: React.ReactNode }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="rounded-lg bg-steel-800 px-3 py-2 text-sm font-semibold text-fog hover:bg-amber hover:text-ink"
+    >
+      {children}
+    </button>
   )
 }
 

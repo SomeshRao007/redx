@@ -18,8 +18,15 @@ session. That part isn't built yet (see [Roadmap](#roadmap)).
 - Installable PWA
 - **M3: Workout plans** — build a plan, exercises rotate automatically within each slot's pool,
   share plans with other users (immutable snapshots), adopt starter plans or shared plans by code.
+- **M4: Rules-based session generation** — time-budget auto-assignment: reps by exercise role
+  (compound/isolation/unknown), sets grown greedily with compound priority; per-set time from user
+  calibration (rest + work durations in Settings). Environment/equipment awareness filters exercise
+  pools by available gear. Temporary injury and movement exclusions (synced per device/user, auto-expire
+  or permanent), mobility blocks (warm-up/cooldown stretches from catalog), warm-up set calculation,
+  plate stacking math, mid-workout exercise swaps, and add-to-session / save-to-plan (pick an exercise
+  mid-workout to add it to today's session; optionally persist it into the plan so it recurs next time).
 
-**Not built yet:** auto-generated sessions, progression, goals, recovery tracking, recommendations.
+**Not built yet:** load auto-progression, RPE, goals, recovery tracking, recommendations.
 See [Roadmap](#roadmap).
 
 Not deployed anywhere yet — runs locally for now.
@@ -44,7 +51,9 @@ Not deployed anywhere yet — runs locally for now.
 Browser (PWA, React + Vite)
   ├─ RxDB + Dexie (IndexedDB)   — local-first store, works offline
   │   ├─ sessions + setlogs    — append-only log of lifts
-  │   └─ plans                 — user's own workout plans (M3)
+  │   ├─ plans                 — user's own workout plans (M3)
+  │   └─ exclusions            — temporary/permanent movement exclusions (M4)
+  ├─ localStorage              — device-local environment + equipment prefs (M4)
   ├─ static exercise catalog   — seeded once, versioned JSON
   ├─ starter plans             — seeded at build time, versioned JSON (M3)
   └─ JWT held client-side
@@ -56,7 +65,8 @@ Cloudflare Pages Functions
   ├─ /share/publish   — publish a plan snapshot (owner-keyed upsert, stable shareCode) (M3)
   └─ /share/[code]    — fetch a shared plan snapshot (M3)
         ▼
-D1 (SQLite) — per-user rows: sessions (with nullable plannedDay), setlogs, plans (M3)
+D1 (SQLite) — per-user rows: sessions (with nullable plannedDay), setlogs, plans (M3),
+              exclusions (M4)
             — cross-user immutable rows: shared_plans (M3)
             ↕ pull restores the same data on a new device
 ```
@@ -96,25 +106,41 @@ Never set it in production.
 **Tests:**
 ```bash
 npm run smoke   # RxDB schema sanity check
-npm run test    # sync replication test
+npm run test    # sync replication, rotation, session generation, lifting math
 ```
 
 ## Using the app
 
 1. Sign in (email/password or Google).
-2. **Plans** (M3) — Build your own workout plan or adopt a starter plan. A plan defines "days"
+2. **Settings** (M4) — Configure your device: environment (home/gym), available equipment, and workout timing.
+   Environment and equipment filters which exercises appear when plans are resolved. Workout timing
+   (rest interval between sets and rough working-set duration) calibrates how many sets fit the Start-day
+   time budget. Also manage temporary or permanent exclusions (rest a muscle group or specific exercise
+   for a preset duration or forever) — useful for injury recovery or focusing on other body parts.
+3. **Plans** (M3) — Build your own workout plan or adopt a starter plan. A plan defines "days"
    (e.g., Push, Pull, Legs), each with "slots" (e.g., Horizontal Push). Each slot holds an exercise pool.
-   When you start a day, the app picks the least-recently-trained exercise from each pool.
-   You can preview and swap picks before locking the day. Share your plans with other users
-   via a stable share code; they can adopt a copy into their own plans.
-3. **Today** — When a plan day is locked, each planned exercise appears as an inline mini-logger:
-   tap a row to expand it, set a per-exercise minimum-sets target, and log weight × reps right there.
-   Rows turn green once you've logged the target number of sets. Any lifts logged outside the plan
-   appear under "Also logged". Stats show today's total set count, lift count, and volume.
-4. **Log** — Search the exercise catalog and log weight + reps per set (logging is now inline on Today
+   When you start a day, the app picks the least-recently-trained exercise from each pool,
+   filtering out excluded exercises and unavailable equipment. You can preview and swap picks
+   before locking the day. Share your plans with other users via a stable share code; they can
+   adopt a copy into their own plans.
+4. **Start Day** (M4) — Enter a time budget (minutes). The app auto-assigns sets and target reps
+   per exercise to fit the budget: reps are set by exercise role (heavy compounds = 8 reps, isolations = 12 reps,
+   unknown = 10), and sets grow one at a time, prioritizing compounds first. Per-set time comes from your
+   calibration in Settings (rest interval + working-set duration). If no budget, everything defaults to 2 sets
+   at role-based reps. Mobility blocks appear for warm-up (stretches targeting the day's trained muscles)
+   and cool-down, each with a seconds countdown.
+5. **Today** — When a plan day is locked, each planned exercise appears as an inline mini-logger.
+   For each exercise: see warm-up sets (steps down from the last working weight) and a plate calculator
+   (barbell plate stack per side; edit the bar weight in the calculator if your bar is not 20 kg). Tap a row to expand it, log weight × reps per set.
+   Mid-workout actions: swap to a different exercise (drawing from your plan's pool),
+   add a new exercise from the catalog (an "+ Add exercise" button at the bottom), or temporarily exclude an exercise
+   or muscle group to rest. Ad-hoc exercises added mid-session can be saved to the plan so they recur next time.
+   Rows turn green once you've logged the target number of sets. Any lifts logged outside the plan appear under "Also logged".
+   Stats show today's total set count, lift count, and volume.
+6. **Log** — Search the exercise catalog and log weight + reps per set (logging is now inline on Today
    when following a plan). Last session's numbers for that exercise are pre-filled.
-5. **History** — Past sessions.
-6. Toggle kg/lb anytime from the header. Export all your data as JSON from the same header.
+7. **History** — Past sessions.
+8. Toggle kg/lb anytime from the header. Export all your data as JSON from the same header.
 
 Data lives on your device first. If you're signed in and online, it syncs to your other
 devices automatically.
@@ -126,8 +152,8 @@ In rough order, each one shippable on its own:
 | | |
 |---|---|
 | ✓ Plans & templates (M3) | Build a workout plan once, reuse it. Exercises rotate automatically within each slot's pool. Share plans with other users (immutable snapshots). |
-| Auto-generated sessions | Given your time and available equipment, the app builds today's session for you. |
-| Progression | Weights increase week over week automatically, with manual override. |
+| ✓ Rules-based generation (M4) | Time-budget auto-assignment, equipment/environment awareness, injury exclusions, mobility blocks, warm-up sets, plate math, mid-workout swaps. |
+| Load progression (M5) | Weights increase week over week automatically, with manual override and RPE logging. |
 | Goals & body tracking | Track weight, measurements, progress photos. See training volume per muscle group over time. |
 | Recovery & consistency | Recovery-readiness score, streaks, nudges when you're falling off pace. |
 | Exercise intelligence | Visual muscle map per exercise; smart classification for custom exercises you add. |

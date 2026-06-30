@@ -1,12 +1,15 @@
-import { useMemo } from 'react'
+import { useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useAuth } from '../auth/AuthContext'
 import { useRxData } from '../db/useRxData'
-import type { SetLog, PlannedDay } from '../db/schema'
+import type { Exercise, SetLog, PlannedDay } from '../db/schema'
+import { addPickToDay } from '../db/plans'
 import { type Unit, useUnit, formatWeight } from '../lib/units'
 import { groupByExercise, totalVolumeKg, type ExerciseGroup } from '../components/groupSets'
 import { SetRow } from '../components/SetRow'
 import { PlannedExerciseRow } from '../components/PlannedExerciseRow'
+import { MobilityBlock } from '../components/MobilityBlock'
+import { ExercisePicker } from '../components/ExercisePicker'
 
 const today = () => new Date().toISOString().slice(0, 10)
 
@@ -15,6 +18,7 @@ export function Today() {
   const userId = user?.id ?? ''
   const unit = useUnit()
   const date = today()
+  const [adding, setAdding] = useState(false)
 
   const todaySessions = useRxData(
     (db) => db.sessions.find({ selector: { userId, date, deletedAt: null } }),
@@ -22,6 +26,14 @@ export function Today() {
   )
   const session = todaySessions[0] ?? null
   const sessionId = session?.id ?? null
+
+  // Catalog maps for swap names + the "rest this muscle" shortcut (M4).
+  const exercises = useRxData<Exercise>((db) => db.exercises.find(), [])
+  const nameOf = useMemo(() => new Map(exercises.map((e) => [e.id, e.name])), [exercises])
+  const muscleOf = useMemo(
+    () => new Map(exercises.map((e) => [e.id, e.primaryMuscles[0] ?? ''])),
+    [exercises],
+  )
 
   const planned = useMemo<PlannedDay | null>(() => {
     if (!session?.plannedDay) return null
@@ -63,11 +75,27 @@ export function Today() {
       {planned && sessionId ? (
         <>
           {sets.length > 0 && <Stats sets={sets.length} lifts={groups.length} volume={formatWeight(volumeKg, unit)} />}
+          {planned.warmup && <MobilityBlock title="Warm-up" steps={planned.warmup} nameOf={nameOf} />}
           <ul className="mt-5 space-y-2">
             {planned.picks.map((pick) => (
-              <PlannedExerciseRow key={pick.slotId} pick={pick} sessionId={sessionId} userId={userId} />
+              <PlannedExerciseRow
+                key={pick.slotId}
+                pick={pick}
+                sessionId={sessionId}
+                userId={userId}
+                nameOf={nameOf}
+                muscleOf={muscleOf}
+              />
             ))}
           </ul>
+          <button
+            type="button"
+            onClick={() => setAdding(true)}
+            className="mt-3 w-full rounded-xl border border-dashed border-steel-700 px-4 py-3 text-sm font-semibold text-fog transition-colors hover:border-amber hover:text-amber"
+          >
+            + Add exercise
+          </button>
+          {planned.cooldown && <MobilityBlock title="Cooldown" steps={planned.cooldown} nameOf={nameOf} />}
           {extraGroups.length > 0 && (
             <div className="mt-7">
               <h2 className="mb-2 text-sm font-bold uppercase tracking-wider text-fog">Also logged</h2>
@@ -84,6 +112,18 @@ export function Today() {
             <LoggedGroups groups={groups} unit={unit} />
           </div>
         </>
+      )}
+
+      {adding && sessionId && (
+        <ExercisePicker
+          title="Add an exercise"
+          exclude={planned?.picks.map((p) => p.exerciseId) ?? []}
+          onPick={(e) => {
+            void addPickToDay(sessionId, e)
+            setAdding(false)
+          }}
+          onClose={() => setAdding(false)}
+        />
       )}
     </section>
   )

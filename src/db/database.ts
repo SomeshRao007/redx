@@ -6,6 +6,7 @@ import {
   sessionSchema,
   setLogSchema,
   planSchema,
+  exclusionSchema,
   type WorkoutDatabase,
 } from './schema'
 
@@ -45,6 +46,7 @@ async function create(): Promise<WorkoutDatabase> {
     },
     setlogs: { schema: setLogSchema },
     plans: { schema: planSchema },
+    exclusions: { schema: exclusionSchema },
   })
   return db
 }

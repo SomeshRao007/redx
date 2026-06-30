@@ -2,8 +2,11 @@ import { useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { useAuth } from '../auth/AuthContext'
 import { useDb, useRxData } from '../db/useRxData'
-import type { Exercise, Plan, PlanDay, PlannedPick } from '../db/schema'
+import type { Exercise, MobilityStep, Plan, PlanDay, PlannedPick } from '../db/schema'
 import { resolveDay, lockDay } from '../db/plans'
+import { fitToBudget, mobilityMinutes } from '../db/generate'
+import { usePrefs, setBudgetMin } from '../lib/prefs'
+import { MobilityBlock } from '../components/MobilityBlock'
 
 export function StartDay() {
   const { id: planId, dayId } = useParams()
@@ -11,14 +14,18 @@ export function StartDay() {
   const userId = user?.id ?? ''
   const navigate = useNavigate()
   const db = useDb()
+  const prefs = usePrefs()
 
   const [plan, setPlan] = useState<Plan | null>(null)
   const [day, setDay] = useState<PlanDay | null>(null)
-  const [picks, setPicks] = useState<PlannedPick[]>([])
+  const [basePicks, setBasePicks] = useState<PlannedPick[]>([])
+  const [warmup, setWarmup] = useState<MobilityStep[]>([])
+  const [cooldown, setCooldown] = useState<MobilityStep[]>([])
   const [loading, setLoading] = useState(true)
 
   const exercises = useRxData<Exercise>((d) => d.exercises.find(), [])
   const nameOf = useMemo(() => new Map(exercises.map((e) => [e.id, e.name])), [exercises])
+  const exMap = useMemo(() => new Map(exercises.map((e) => [e.id, e])), [exercises])
 
   useEffect(() => {
     if (!db || !planId || !dayId) return
@@ -33,11 +40,13 @@ export function StartDay() {
         }
         const p = doc.toJSON() as Plan
         const found = (JSON.parse(p.days) as PlanDay[]).find((x) => x.id === dayId) ?? null
-        const resolved = await resolveDay(p, dayId, userId) // proposal: least-recently-trained
+        const resolved = await resolveDay(p, dayId, userId) // equipment/exclusion-filtered proposal
         if (!alive) return
         setPlan(p)
         setDay(found)
-        setPicks(resolved.picks)
+        setBasePicks(resolved.picks)
+        setWarmup(resolved.warmup ?? [])
+        setCooldown(resolved.cooldown ?? [])
         setLoading(false)
       })
     return () => {
@@ -45,8 +54,15 @@ export function StartDay() {
     }
   }, [db, planId, dayId, userId])
 
+  // Sets/reps fit the budget live (no budget → 2×10); load stays user-entered. Compounds favored.
+  const mobMin = useMemo(() => mobilityMinutes([...warmup, ...cooldown]), [warmup, cooldown])
+  const picks = useMemo(
+    () => fitToBudget(basePicks, exMap, prefs.budgetMin, mobMin, { restSec: prefs.restSec, workSec: prefs.workSec }),
+    [basePicks, exMap, prefs.budgetMin, mobMin, prefs.restSec, prefs.workSec],
+  )
+
   function swap(slotId: string, exerciseId: string) {
-    setPicks((cur) =>
+    setBasePicks((cur) =>
       cur.map((p) =>
         p.slotId === slotId
           ? { ...p, exerciseId, exerciseName: nameOf.get(exerciseId) ?? exerciseId }
@@ -57,7 +73,7 @@ export function StartDay() {
 
   async function onLock() {
     if (!plan || !day) return
-    await lockDay(userId, { planId: plan.id, dayId: day.id, label: day.label, picks })
+    await lockDay(userId, { planId: plan.id, dayId: day.id, label: day.label, picks, warmup, cooldown })
     navigate('/app/today')
   }
 
@@ -84,8 +100,27 @@ export function StartDay() {
 
       <h1 className="font-display text-3xl font-black tracking-tight">{day.label}</h1>
       <p className="mt-1 text-sm text-fog">
-        Proposed by least-recently-trained. Tap to swap, then lock it in.
+        Proposed by least-recently-trained, filtered to your kit. Tap to swap, set a time budget, then lock it in.
       </p>
+
+      {/* Time budget — sets/reps auto-fit; blank = no limit (default 2×10). */}
+      <label className="mt-4 flex items-center justify-between gap-3 rounded-xl border border-steel-800 bg-steel-900 px-4 py-3">
+        <span className="text-sm font-semibold uppercase tracking-wide text-fog">Time budget</span>
+        <span className="flex items-baseline gap-1.5">
+          <input
+            type="number"
+            inputMode="numeric"
+            min="0"
+            step="5"
+            value={prefs.budgetMin || ''}
+            onChange={(e) => setBudgetMin(Number(e.target.value) || 0)}
+            placeholder="—"
+            aria-label="Time budget in minutes"
+            className="nums w-16 bg-transparent text-right text-2xl font-black text-chalk outline-none placeholder:text-steel-600"
+          />
+          <span className="text-sm font-semibold text-fog">min</span>
+        </span>
+      </label>
 
       {picks.length === 0 ? (
         <p className="mt-6 rounded-xl border border-dashed border-steel-700 px-4 py-8 text-center text-sm text-fog">
@@ -96,34 +131,50 @@ export function StartDay() {
           .
         </p>
       ) : (
-        <ul className="mt-5 space-y-4">
-          {picks.map((pick) => {
-            const slot = day.slots.find((s) => s.id === pick.slotId)
-            return (
-              <li key={pick.slotId} className="rounded-2xl border border-steel-800 bg-steel-900 p-4">
-                <p className="text-xs font-bold uppercase tracking-widest text-amber">{pick.slotLabel}</p>
-                <div className="mt-2 flex flex-wrap gap-2">
-                  {slot?.exercisePool.map((exId) => {
-                    const active = exId === pick.exerciseId
-                    return (
-                      <button
-                        key={exId}
-                        type="button"
-                        onClick={() => swap(pick.slotId, exId)}
-                        aria-pressed={active}
-                        className={`rounded-lg px-3 py-2 text-sm font-semibold transition-colors ${
-                          active ? 'bg-amber text-ink' : 'bg-steel-800 text-fog hover:text-chalk'
-                        }`}
-                      >
-                        {nameOf.get(exId) ?? exId}
-                      </button>
-                    )
-                  })}
-                </div>
-              </li>
-            )
-          })}
-        </ul>
+        <>
+          <MobilityBlock title="Warm-up" steps={warmup} nameOf={nameOf} />
+
+          <ul className="mt-5 space-y-4">
+            {picks.map((pick) => {
+              const slot = day.slots.find((s) => s.id === pick.slotId)
+              return (
+                <li key={pick.slotId} className="rounded-2xl border border-steel-800 bg-steel-900 p-4">
+                  <div className="flex items-baseline justify-between gap-2">
+                    <p className="text-xs font-bold uppercase tracking-widest text-amber">{pick.slotLabel}</p>
+                    {pick.minSets != null && (
+                      <p className="nums text-xs font-bold text-fog">
+                        {pick.minSets} × {pick.targetReps}
+                      </p>
+                    )}
+                  </div>
+                  {pick.unavailable && (
+                    <p className="mt-1 text-xs font-semibold text-amber-dim">⚠ No available match (kit or rest) — showing all</p>
+                  )}
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    {slot?.exercisePool.map((exId) => {
+                      const active = exId === pick.exerciseId
+                      return (
+                        <button
+                          key={exId}
+                          type="button"
+                          onClick={() => swap(pick.slotId, exId)}
+                          aria-pressed={active}
+                          className={`rounded-lg px-3 py-2 text-sm font-semibold transition-colors ${
+                            active ? 'bg-amber text-ink' : 'bg-steel-800 text-fog hover:text-chalk'
+                          }`}
+                        >
+                          {nameOf.get(exId) ?? exId}
+                        </button>
+                      )
+                    })}
+                  </div>
+                </li>
+              )
+            })}
+          </ul>
+
+          <MobilityBlock title="Cooldown" steps={cooldown} nameOf={nameOf} />
+        </>
       )}
 
       {picks.length > 0 && (

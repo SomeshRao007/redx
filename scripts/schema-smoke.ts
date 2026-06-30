@@ -14,6 +14,7 @@ import {
   sessionSchema,
   setLogSchema,
   planSchema,
+  exclusionSchema,
   type WorkoutDatabase,
 } from '../src/db/schema'
 
@@ -32,6 +33,7 @@ await db.addCollections({
   },
   setlogs: { schema: setLogSchema },
   plans: { schema: planSchema },
+  exclusions: { schema: exclusionSchema },
 })
 
 const base = {
